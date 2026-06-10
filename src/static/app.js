@@ -16,6 +16,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let adminToken = "";
   let teacherUsername = "";
 
+  function escapeHtml(value) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
   function authHeaders() {
     return adminToken ? { Authorization: `Bearer ${adminToken}` } : {};
   }
@@ -76,9 +85,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span>${
+                      `<li><span class="participant-email">${escapeHtml(
+                        email
+                      )}</span>${
                         adminToken
-                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>`
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${escapeHtml(
+                              email
+                            )}">❌</button>`
                           : ""
                       }</li>`
                   )
