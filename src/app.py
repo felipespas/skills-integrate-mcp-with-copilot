@@ -5,10 +5,15 @@ A super simple FastAPI application that allows students to view and sign up
 for extracurricular activities at Mergington High School.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+import secrets
 import os
+import json
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 app = FastAPI(title="Mergington High School API",
@@ -18,6 +23,26 @@ app = FastAPI(title="Mergington High School API",
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+TEACHERS_FILE = current_dir / "teachers.json"
+
+with open(TEACHERS_FILE, "r", encoding="utf-8") as file:
+    teacher_data = json.load(file)
+
+teacher_credentials = {
+    teacher["username"]: teacher["password"]
+    for teacher in teacher_data.get("teachers", [])
+}
+
+TOKEN_TTL_SECONDS = 60 * 60
+MAX_ACTIVE_ADMIN_TOKENS = 1000
+active_admin_tokens = OrderedDict()
 
 # In-memory activity database
 activities = {
@@ -78,6 +103,34 @@ activities = {
 }
 
 
+def cleanup_expired_tokens() -> None:
+    """Remove expired admin sessions from the in-memory token store."""
+    now = time.time()
+    expired_tokens = [
+        token
+        for token, session in active_admin_tokens.items()
+        if session["expires_at"] <= now
+    ]
+
+    for token in expired_tokens:
+        active_admin_tokens.pop(token, None)
+
+
+def get_teacher_username(authorization: str) -> str:
+    """Return the teacher username associated with the bearer token."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Teacher login required")
+
+    token = authorization.replace("Bearer ", "", 1).strip()
+    cleanup_expired_tokens()
+    session = active_admin_tokens.get(token)
+
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    return session["username"]
+
+
 @app.get("/")
 def root():
     return RedirectResponse(url="/static/index.html")
@@ -88,9 +141,46 @@ def get_activities():
     return activities
 
 
+@app.post("/auth/login")
+def login_as_teacher(login_request: LoginRequest):
+    """Authenticate a teacher and create an admin session token."""
+    expected_password = teacher_credentials.get(login_request.username)
+
+    if expected_password != login_request.password:
+        raise HTTPException(status_code=401, detail="Invalid teacher credentials")
+
+    cleanup_expired_tokens()
+    token = secrets.token_urlsafe(24)
+    while len(active_admin_tokens) >= MAX_ACTIVE_ADMIN_TOKENS:
+        active_admin_tokens.popitem(last=False)
+
+    active_admin_tokens[token] = {
+        "username": login_request.username,
+        "expires_at": time.time() + TOKEN_TTL_SECONDS,
+    }
+
+    return {
+        "message": "Teacher login successful",
+        "token": token,
+        "username": login_request.username,
+    }
+
+
+@app.post("/auth/logout")
+def logout_teacher(authorization: str = Header(default="")):
+    """Invalidate the current admin session token."""
+    if authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "", 1).strip()
+        active_admin_tokens.pop(token, None)
+
+    return {"message": "Logged out"}
+
+
 @app.post("/activities/{activity_name}/signup")
-def signup_for_activity(activity_name: str, email: str):
+def signup_for_activity(activity_name: str, email: str, _teacher: str = Header(default="", alias="Authorization")):
     """Sign up a student for an activity"""
+    get_teacher_username(_teacher)
+
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -111,8 +201,10 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
+def unregister_from_activity(activity_name: str, email: str, _teacher: str = Header(default="", alias="Authorization")):
     """Unregister a student from an activity"""
+    get_teacher_username(_teacher)
+
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
