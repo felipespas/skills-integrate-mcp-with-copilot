@@ -153,7 +153,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   userMenuToggle.addEventListener("click", () => {
+    const willShow = userDropdown.classList.contains("hidden");
     userDropdown.classList.toggle("hidden");
+    userMenuToggle.setAttribute("aria-expanded", String(willShow));
   });
 
   loginTrigger.addEventListener("click", () => {
