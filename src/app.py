@@ -12,6 +12,8 @@ from pydantic import BaseModel
 import secrets
 import os
 import json
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 app = FastAPI(title="Mergington High School API",
@@ -38,7 +40,9 @@ teacher_credentials = {
     for teacher in teacher_data.get("teachers", [])
 }
 
-active_admin_tokens = {}
+TOKEN_TTL_SECONDS = 60 * 60
+MAX_ACTIVE_ADMIN_TOKENS = 1000
+active_admin_tokens = OrderedDict()
 
 # In-memory activity database
 activities = {
@@ -99,18 +103,32 @@ activities = {
 }
 
 
+def cleanup_expired_tokens() -> None:
+    """Remove expired admin sessions from the in-memory token store."""
+    now = time.time()
+    expired_tokens = [
+        token
+        for token, session in active_admin_tokens.items()
+        if session["expires_at"] <= now
+    ]
+
+    for token in expired_tokens:
+        active_admin_tokens.pop(token, None)
+
+
 def get_teacher_username(authorization: str) -> str:
     """Return the teacher username associated with the bearer token."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Teacher login required")
 
     token = authorization.replace("Bearer ", "", 1).strip()
-    username = active_admin_tokens.get(token)
+    cleanup_expired_tokens()
+    session = active_admin_tokens.get(token)
 
-    if not username:
+    if not session:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
 
-    return username
+    return session["username"]
 
 
 @app.get("/")
@@ -131,8 +149,15 @@ def login_as_teacher(login_request: LoginRequest):
     if expected_password != login_request.password:
         raise HTTPException(status_code=401, detail="Invalid teacher credentials")
 
+    cleanup_expired_tokens()
     token = secrets.token_urlsafe(24)
-    active_admin_tokens[token] = login_request.username
+    while len(active_admin_tokens) >= MAX_ACTIVE_ADMIN_TOKENS:
+        active_admin_tokens.popitem(last=False)
+
+    active_admin_tokens[token] = {
+        "username": login_request.username,
+        "expires_at": time.time() + TOKEN_TTL_SECONDS,
+    }
 
     return {
         "message": "Teacher login successful",
