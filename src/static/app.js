@@ -89,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         email
                       )}</span>${
                         adminToken
-                          ? `<button class="delete-btn" data-activity="${name}" data-email="${escapeHtml(
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${encodeURIComponent(
                               email
                             )}">❌</button>`
                           : ""
@@ -142,7 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch(
         `/activities/${encodeURIComponent(
           activity
-        )}/unregister?email=${encodeURIComponent(email)}`,
+        )}/unregister?email=${email}`,
         {
           method: "DELETE",
           headers: authHeaders(),
