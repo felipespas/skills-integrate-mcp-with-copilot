@@ -254,6 +254,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".user-menu")) {
       userDropdown.classList.add("hidden");
+      userMenuToggle.setAttribute("aria-expanded", "false");
     }
   });
 
